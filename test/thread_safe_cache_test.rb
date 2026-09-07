@@ -5,6 +5,10 @@ class ThreadSafeCacheTest < CacheTest
     @c = LruRedux::ThreadSafeCache.new(3)
   end
 
+  def new_cache(max_size, options = {})
+    LruRedux::ThreadSafeCache.new(max_size, options)
+  end
+
   def test_recursion
       @c[:a] = 1
       @c[:b] = 2

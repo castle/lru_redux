@@ -6,6 +6,10 @@ class TTLThreadSafeCacheTest < TTLCacheTest
     @c = LruRedux::TTL::ThreadSafeCache.new 3, 5 * 60
   end
 
+  def new_ttl_cache(max_size, ttl, options = {})
+    LruRedux::TTL::ThreadSafeCache.new(max_size, ttl, options)
+  end
+
   def test_recursion
     @c[:a] = 1
     @c[:b] = 2
