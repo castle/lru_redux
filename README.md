@@ -173,7 +173,7 @@ cache = LruRedux::TTL::Cache.new(100, on_evict: lambda { |key, value| p "evicted
 cache = LruRedux::TTL::ThreadSafeCache.new(100, 5 * 60, on_evict: lambda { |key, value| p "evicted #{key} #{value}" })
 ```
 
-`#clear` calls the callback for every cached entry, in eviction order (least recently used first).  `#delete`, `#evict` and overwriting an existing key do not trigger the callback; those hand the value back to the caller or replace it outright.  The entry is removed from the cache before the callback runs, so a callback is free to call back into the cache.  On the thread safe caches the callback runs while the cache lock is held.
+`#clear` calls the callback for every cached entry, in eviction order (least recently used first).  `#delete`, `#evict` and overwriting an existing key do not trigger the callback; those hand the value back to the caller or replace it outright.  The entry is removed from the cache before the callback runs, so a callback is free to call back into the cache.  On the thread safe caches the callback runs while the cache lock is held, so every other cache operation blocks until it returns.  Keep the callback quick and hand slow work such as network calls off to a queue or a thread.
 
 ## Cache Methods
 - `#getset` Takes a key and block.  Will return a value if cached, otherwise will execute the block and cache the resulting value.
