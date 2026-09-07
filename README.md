@@ -4,6 +4,7 @@ An efficient, thread safe LRU cache.
 - [Installation](#installation)
 - [Usage](#usage)
   - [TTL Cache](#ttl-cache)
+  - [Eviction Callback](#eviction-callback)
 - [Cache Methods](#cache-methods)
 - [Benchmarks](#benchmarks)
 - [Other Caches](#other-caches)
@@ -134,6 +135,46 @@ cache = LruRedux::TTL::Cache.new(100)
 cache = LruRedux::TTL::ThreadSafeCache.new(100, 5 * 60)
 ```
 
+#### Eviction Callback
+Every cache accepts an `on_evict:` callback that is called with the key and value of each evicted entry.  It is called when an entry is dropped to keep the cache within `max_size` and, on the TTL cache, when an entry expires.
+
+```ruby
+require 'lru_redux'
+
+# The callback is any object responding to #call and
+# receives the key and value of the evicted entry.
+cache = LruRedux::Cache.new(2, on_evict: lambda { |key, value| p "evicted #{key} #{value}" })
+
+cache[:a] = 1
+cache[:b] = 2
+cache[:c] = 3
+# "evicted a 1"
+
+# Shrinking the cache evicts as well.
+cache.max_size = 1
+# "evicted b 2"
+
+# So does clearing it.
+cache.clear
+# "evicted c 3"
+
+# The callback can be changed on a live cache with #on_evict=
+# and removed by setting it to nil.
+cache.on_evict = proc { |key| p "evicted #{key}" }
+cache.on_evict = nil
+
+# The TTL cache also calls the callback on TTL eviction.
+cache = LruRedux::TTL::Cache.new(100, 5 * 60, on_evict: lambda { |key, value| p "evicted #{key} #{value}" })
+
+# The TTL argument stays optional when a callback is given.
+cache = LruRedux::TTL::Cache.new(100, on_evict: lambda { |key, value| p "evicted #{key} #{value}" })
+
+# A thread safe version is available.
+cache = LruRedux::TTL::ThreadSafeCache.new(100, 5 * 60, on_evict: lambda { |key, value| p "evicted #{key} #{value}" })
+```
+
+`#clear` calls the callback for every cached entry, in eviction order (least recently used first).  `#delete`, `#evict` and overwriting an existing key do not trigger the callback; those hand the value back to the caller or replace it outright.  The entry is removed from the cache before the callback runs, so a callback is free to call back into the cache.  On the thread safe caches the callback runs while the cache lock is held, so every other cache operation blocks until it returns.  Keep the callback quick and hand slow work such as network calls off to a queue or a thread.
+
 ## Cache Methods
 - `#getset` Takes a key and block.  Will return a value if cached, otherwise will execute the block and cache the resulting value.
 - `#fetch` Takes a key and optional block.  Will return a value if cached, otherwise will execute the block and return the resulting value or return nil if no block is provided.
@@ -149,6 +190,8 @@ cache = LruRedux::TTL::ThreadSafeCache.new(100, 5 * 60)
 - `#count` Return the current number of items stored in the cache.
 - `#max_size` Returns the current maximum size of the cache.
 - `#max_size=` Takes a positive number.  Changes the current max_size and triggers a resize.  Also triggers TTL eviction on the TTL cache.
+- `#on_evict` Returns the current eviction callback, or nil if there is none.
+- `#on_evict=` Takes a callable accepting the key and value of an evicted entry, or nil to remove the callback.
 
 #### TTL Cache Specific
 - `#ttl` Returns the current TTL of the cache.
@@ -247,6 +290,10 @@ This is a list of the caches that are used in the benchmarks.
 5. Create new Pull Request
 
 ## Changelog
+### unreleased
+
+- New: `on_evict:` eviction callback added.  All caches accept a callable that is called with the key and value of every evicted entry.  Check the Usage -> Eviction Callback section in README.md for details.
+
 ### version 1.1.0 - 30-Mar-2015
 
 - New: TTL cache added.  This cache is LRU like with the addition of time-based eviction.  Check the Usage -> TTL Cache section in README.md for details.

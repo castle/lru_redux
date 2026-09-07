@@ -1,11 +1,17 @@
 module LruRedux
   module TTL
     class Cache
-      attr_reader :max_size, :ttl
+      attr_reader :max_size, :ttl, :on_evict
 
       def initialize(*args)
-        max_size, ttl = args
+        max_size, ttl, options = args
 
+        if ttl.is_a?(Hash) && options.nil?
+          options = ttl
+          ttl = nil
+        end
+
+        options ||= {}
         ttl ||= :none
 
         raise ArgumentError.new(:max_size) if
@@ -15,6 +21,7 @@ module LruRedux
 
         @max_size = max_size
         @ttl = ttl
+        @on_evict = validate_on_evict(options[:on_evict])
         @data_lru = {}
         @data_ttl = {}
       end
@@ -41,6 +48,11 @@ module LruRedux
         ttl_evict
       end
 
+      # Takes a callable accepting (key, value) or nil to disable the callback.
+      def on_evict=(on_evict)
+        @on_evict = validate_on_evict(on_evict)
+      end
+
       def getset(key)
         ttl_evict
 
@@ -52,12 +64,7 @@ module LruRedux
           result = @data_lru[key] = yield
           @data_ttl[key] = Time.now.to_f
 
-          if @data_lru.size > @max_size
-            key, _ = @data_lru.first
-
-            @data_ttl.delete(key)
-            @data_lru.delete(key)
-          end
+          evict_lru
 
           result
         end
@@ -96,12 +103,7 @@ module LruRedux
         @data_lru[key] = val
         @data_ttl[key] = Time.now.to_f
 
-        if @data_lru.size > @max_size
-          key, _ = @data_lru.first
-
-          @data_ttl.delete(key)
-          @data_lru.delete(key)
-        end
+        evict_lru
 
         val
       end
@@ -150,8 +152,19 @@ module LruRedux
       alias_method :has_key?, :key?
 
       def clear
-        @data_lru.clear
-        @data_ttl.clear
+        # the cache is emptied before the first callback runs so that a
+        # callback calling back into the cache does not have its entry cleared
+        data_lru = @data_lru
+        @data_lru = {}
+        @data_ttl = {}
+
+        if @on_evict
+          data_lru.each do |key, value|
+            @on_evict.call(key, value)
+          end
+        end
+
+        data_lru.clear
       end
 
       def expire
@@ -169,6 +182,13 @@ module LruRedux
         @data_lru.size == @data_ttl.size
       end
 
+      def validate_on_evict(on_evict)
+        raise ArgumentError.new(:on_evict) unless
+            on_evict.nil? || on_evict.respond_to?(:call)
+
+        on_evict
+      end
+
       def ttl_evict
         return if @ttl == :none
 
@@ -177,23 +197,34 @@ module LruRedux
 
         until time.nil? || time > ttl_horizon
           @data_ttl.delete(key)
-          @data_lru.delete(key)
+          value = @data_lru.delete(key)
+
+          @on_evict.call(key, value) if @on_evict
 
           key, time = @data_ttl.first
+        end
+      end
+
+      # Drops the least recently used entries until the cache is back within
+      # max_size, notifying the on_evict callback of every dropped entry.  The
+      # entry is removed before the callback runs, so a callback is free to
+      # call back into the cache.
+      def evict_lru
+        while @data_lru.size > @max_size
+          key, value = @data_lru.first
+
+          @data_lru.delete(key)
+          @data_ttl.delete(key)
+
+          @on_evict.call(key, value) if @on_evict
         end
       end
 
       def resize
         ttl_evict
 
-        while @data_lru.size > @max_size
-          key, _ = @data_lru.first
-
-          @data_ttl.delete(key)
-          @data_lru.delete(key)
-        end
+        evict_lru
       end
     end
   end
 end
-

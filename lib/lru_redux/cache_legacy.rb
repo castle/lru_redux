@@ -2,16 +2,6 @@
 #
 # This is an ultra efficient 1.9 freindly implementation
 class LruRedux::Cache
-  def max_size=(size)
-    raise ArgumentError.new(:max_size) if @max_size < 1
-    @max_size = size
-    if @max_size < @data.size
-      @data.keys[0..@max_size-@data.size].each do |k|
-        @data.delete(k)
-      end
-    end
-  end
-
   def getset(key)
     found = true
     value = @data.delete(key){ found = false }
@@ -19,8 +9,7 @@ class LruRedux::Cache
       @data[key] = value
     else
       result = @data[key] = yield
-      # this may seem odd see: http://bugs.ruby-lang.org/issues/8312
-      @data.delete(@data.first[0]) if @data.length > @max_size
+      evict_lru if @data.length > @max_size
       result
     end
   end
@@ -28,13 +17,21 @@ class LruRedux::Cache
   def []=(key,val)
     @data.delete(key)
     @data[key] = val
-    # this may seem odd see: http://bugs.ruby-lang.org/issues/8312
-    @data.delete(@data.first[0]) if @data.length > @max_size
+    evict_lru if @data.length > @max_size
     val
   end
 
-  # for cache validation only, ensures all is sound
-  def valid?
-    true
+  protected
+
+  # Hash#shift is broken before Ruby 2.1, so the least recently used entry is
+  # looked up and deleted by key instead.
+  # this may seem odd see: http://bugs.ruby-lang.org/issues/8312
+  def evict_lru
+    while @data.size > @max_size
+      key = @data.first[0]
+      value = @data.delete(key)
+
+      @on_evict.call(key, value) if @on_evict
+    end
   end
 end

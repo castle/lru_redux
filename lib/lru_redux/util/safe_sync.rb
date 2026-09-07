@@ -21,6 +21,12 @@ module LruRedux
         end
       end
 
+      def on_evict=(on_evict)
+        synchronize do
+          super(on_evict)
+        end
+      end
+
       def getset(key)
         synchronize do
           super(key)
